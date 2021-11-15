@@ -9,18 +9,18 @@ name = "capstone"
 repository = "https://github.com/capstone-rust/capstone-rs"
 readme = "README.md"
 edition = "2018"
-version = "0.6.0"
+version = "0.10.0"
 
 [badges]
 travis-ci = { repository = "capstone-rust/capstone-rs" }
 
 [dependencies]
-capstone-sys = { path = "../capstone-sys", version = "0.10.0" }
+capstone-sys = { path = "../capstone-sys", version = "0.14.0" }
 libc = { version = "0.2", default-features = false }
 
 [dev-dependencies]
 macho = "0.*"
-criterion = "0.2"
+criterion = "0.3"
 rayon = "1.1"
 
 [[bench]]

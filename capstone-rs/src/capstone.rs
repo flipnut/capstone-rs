@@ -1,13 +1,13 @@
 use alloc::string::{String, ToString};
 use core::convert::From;
 use core::marker::PhantomData;
-use core::mem;
 
 use libc::{c_int, c_uint, c_void};
 
-use crate::arch::CapstoneBuilder;
 use capstone_sys::cs_opt_value::*;
 use capstone_sys::*;
+
+use crate::arch::CapstoneBuilder;
 use crate::constants::{Arch, Endian, ExtraMode, Mode, OptValue, Syntax};
 use crate::error::*;
 use crate::ffi::str_from_cstr_ptr;
@@ -15,8 +15,9 @@ use crate::instruction::{
     Insn, InsnDetail, InsnGroupId, InsnId, InsnRegsAccess, Instructions, RegId,
 };
 
-
 /// An instance of the capstone disassembler
+///
+/// Create with an instance with [`.new()`](Self::new) and disassemble bytes with [`.disasm_all()`](Self::disasm_all).
 #[derive(Debug)]
 pub struct Capstone {
     /// Opaque handle to cs_engine
@@ -108,6 +109,7 @@ impl Capstone {
     /// use capstone::prelude::*;
     /// let cs = Capstone::new().x86().mode(arch::x86::ArchMode::Mode32).build();
     /// ```
+    #[allow(clippy::new_ret_no_self)]
     pub fn new() -> CapstoneBuilder {
         CapstoneBuilder::new()
     }
@@ -166,6 +168,12 @@ impl Capstone {
     }
 
     /// Disassemble all instructions in buffer
+    ///
+    /// ```
+    /// # use capstone::prelude::*;
+    /// # let cs = Capstone::new().x86().mode(arch::x86::ArchMode::Mode32).build().unwrap();
+    /// cs.disasm_all(b"\x90", 0x1000).unwrap();
+    /// ```
     pub fn disasm_all<'a>(&'a self, code: &[u8], addr: u64) -> CsResult<Instructions<'a>> {
         self.disasm(code, addr, 0)
     }
@@ -187,7 +195,14 @@ impl Capstone {
     ///
     /// Pass `count = 0` to disassemble all instructions in the buffer.
     fn disasm<'a>(&'a self, code: &[u8], addr: u64, count: usize) -> CsResult<Instructions<'a>> {
-        let mut ptr: *mut cs_insn = unsafe { mem::zeroed() };
+        // SAFETY NOTE: `cs_disasm()` will write the error state into the
+        // `struct cs_struct` (true form of the `self.csh`) `errnum` field.
+        // CLAIM: since:
+        // - `Capstone` is not `Send`/`Sync`
+        // - The mutation is done through a `*mut c_void` (not through a const reference)
+        // it *should* be safe to accept `&self` (instead of `&mut self`) in this method.
+
+        let mut ptr: *mut cs_insn = core::ptr::null_mut();
         let insn_count = unsafe {
             cs_disasm(
                 self.csh(),

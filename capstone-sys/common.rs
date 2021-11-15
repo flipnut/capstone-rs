@@ -24,7 +24,7 @@ impl<'a> CapstoneArchInfo<'a> {
     }
 }
 
-pub static ARCH_INCLUDES: &'static [CapstoneArchInfo<'static>] = &[
+pub static ARCH_INCLUDES: &[CapstoneArchInfo<'static>] = &[
     CapstoneArchInfo {
         header_name: "arm.h",
         cs_name: "arm",
@@ -54,6 +54,10 @@ pub static ARCH_INCLUDES: &'static [CapstoneArchInfo<'static>] = &[
         cs_name: "ppc",
     },
     CapstoneArchInfo {
+        header_name: "riscv.h",
+        cs_name: "riscv",
+    },
+    CapstoneArchInfo {
         header_name: "sparc.h",
         cs_name: "sparc",
     },
@@ -75,4 +79,5 @@ pub static ARCH_INCLUDES: &'static [CapstoneArchInfo<'static>] = &[
     },
 ];
 
-pub static BINDINGS_FILE: &'static str = "capstone.rs";
+pub static BINDINGS_FILE: &str = "capstone.rs";
+pub static BINDINGS_IMPL_FILE: &str = "capstone_archs_impl.rs";

@@ -4,6 +4,36 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## UNRELEASED - YYYY-MM-DD
+### Fixed
+- Document that minimum supported Rust version is actually 1.50.0
+    - Improperly documented as 1.40.0 in 0.14.0 release
+
+## [0.14.0] - 2021-08-09
+
+### Added
+- Compile WASM support
+
+### Changed
+- Bump bindgen version to 0.59.1
+
+## [0.13.0] - 2021-07-13
+
+### Added
+- Support for RISC-V architecture
+
+### Changed
+- Upgraded bundled capstone to from [a42f9fa9 to f278de39](https://github.com/aquynh/capstone/compare/a42f9fa9...f278de39)
+- Updated minimum supported Rust version to 1.40.0
+
+## [0.12.0] - 2021-04-09
+### Changed
+- Upgraded bundled capstone to from [154f91a5 to a42f9fa9](https://github.com/aquynh/capstone/compare/154f91a5...a42f9fa9)
+
+## [0.11.0] - 2020-03-16
+### Changed
+- Upgraded bundled capstone to from [0cc60fb9 to 154f91a5](https://github.com/aquynh/capstone/compare/0cc60fb9...154f91a5)
+
 ## [0.10.0] - 2019-04-17
 ### Changed
 - Upgraded bundled capstone to release 4.0
@@ -69,6 +99,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Removed
 - Dependency
 
+[0.14.0]: https://github.com/capstone-rust/capstone-rs/compare/capstone-sys-v0.13.0...capstone-sys-v0.14.0
+[0.13.0]: https://github.com/capstone-rust/capstone-rs/compare/capstone-sys-v0.12.0...capstone-sys-v0.13.0
+[0.12.0]: https://github.com/capstone-rust/capstone-rs/compare/capstone-sys-v0.11.0...capstone-sys-v0.12.0
+[0.11.0]: https://github.com/capstone-rust/capstone-rs/compare/capstone-sys-v0.10.0...capstone-sys-v0.11.0
 [0.10.0]: https://github.com/capstone-rust/capstone-rs/compare/capstone-sys-v0.9.1...capstone-sys-v0.10.0
 [0.9.1]: https://github.com/capstone-rust/capstone-sys/compare/v0.9.0...v0.9.1
 [0.9.0]: https://github.com/capstone-rust/capstone-sys/compare/v0.8.0...v0.9.0

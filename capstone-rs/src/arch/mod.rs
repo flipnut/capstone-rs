@@ -285,6 +285,18 @@ macro_rules! arch_info_base {
                 ( both_endian: true )
             ]
             [
+                ( riscv, RISCV )
+                ( mode:
+                    RiscV32,
+                    RiscV64,
+                    )
+                ( extra_modes:
+                    RiscVC,
+                    )
+                ( syntax: )
+                ( both_endian: true )
+            ]
+            [
                 ( sparc, SPARC )
                 ( mode:
                     Default,
@@ -349,7 +361,7 @@ pub trait BuildsCapstone<ArchMode> {
     fn detail(self, enable_detail: bool) -> Self;
 
     /// Get final `Capstone`
-    fn build<'a>(self) -> CsResult<Capstone>;
+    fn build(self) -> CsResult<Capstone>;
 }
 
 /// Implies that a `CapstoneBuilder` architecture has extra modes
@@ -484,6 +496,13 @@ macro_rules! detail_arch_base {
                 => arch_name = ppc,
             ]
             [
+                detail = RiscVDetail,
+                insn_detail = RiscVInsnDetail<'a>,
+                op = RiscVOperand,
+                /// Returns the RISCV details, if any
+                => arch_name = riscv,
+            ]
+            [
                 detail = SparcDetail,
                 insn_detail = SparcInsnDetail<'a>,
                 op = SparcOperand,
@@ -608,10 +627,11 @@ macro_rules! def_arch_details_struct {
             type Item = $Operand;
 
             fn next(&mut self) -> Option<Self::Item> {
-                match self.0.next() {
-                    None => None,
-                    Some(op) => Some($Operand::from(op)),
-                }
+                self.0.next().map($Operand::from)
+            }
+
+            fn size_hint(&self) -> (usize, Option<usize>) {
+                self.0.size_hint()
             }
         }
 
@@ -664,7 +684,7 @@ macro_rules! define_arch_mods {
             ( mode: $( $mode:ident, )+ )
             ( extra_modes: $( $extra_mode:ident, )* )
             ( syntax: $( $syntax:ident, )* )
-            ( both_endian: $( $endian:ident )* )
+            ( both_endian: $( $endian:expr )* )
         ] )+
     ) => {
         $( pub mod $arch; )+

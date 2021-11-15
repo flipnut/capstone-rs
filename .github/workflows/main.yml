@@ -1,0 +1,32 @@
+on:
+  - push
+  - pull_request
+
+name: main
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        rust:
+          - 1.50.0
+          - stable
+          - beta
+          - nightly
+
+    steps:
+      - uses: actions/checkout@v2
+
+      - uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: ${{ matrix.rust }}
+          override: true
+
+      - name: test
+        run: ./capstone-rs/ci/test.sh
+
+      - name: test (all features)
+        run: ALL_FEATURES=1 ./capstone-rs/ci/test.sh

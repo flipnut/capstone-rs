@@ -5,12 +5,14 @@
 #
 # FEATURES: (none by default)
 # NO_DEFAULT_FEATURES: enables --no-default-features
+# ALL_FEATURES: enables --all-features
 # JOB: {*test,valgrind-test,bench,cov}
 # PROFILES: list of {debug,release} [debug release]
 # SHOULD_FAIL: (disabled by default; set to non-empty string to enable)
 # VALGRIND_TESTS: run tests under Valgrind
 
 set -euo pipefail
+set -x
 
 if [ $(basename "$0") = "test.sh" ]; then
     cd "$(dirname "$0")/.."
@@ -18,11 +20,30 @@ else
     echo "Script is sourced"
 fi
 
+pwd
+
+Error() {
+    echo "Error:" "$@" >&2
+    exit 1
+}
+
 RUST_BACKTRACE=1
 SHOULD_FAIL=${SHOULD_FAIL:-}  # Default to false
 VALGRIND_TESTS=${VALGRIND_TESTS:-}
-FEATURES="${FEATURES-}"  # Default to no features
-NO_DEFAULT_FEATURES="${NO_DEFAULT_FEATURES:+--no-default-features}"
+
+# Feature vars
+if [ -n "${ALL_FEATURES:-}" -a -n "${NO_DEFAULT_FEATURES:-}" ]; then
+    Error "ALL_FEATURES and NO_DEFAULT_FEATURES are mutually exclusive"
+fi
+if [ -n "${ALL_FEATURES:-}" -a -n "${FEATURES:-}" ]; then
+    Error "ALL_FEATURES and FEATURES are mutually exclusive"
+fi
+CARGO_FEATURE_ARGS=(
+    ${NO_DEFAULT_FEATURES:+ --no-default-features}
+    ${ALL_FEATURES:+ --all-features}
+    ${FEATURES:+ --features "$FEATURES"}
+)
+
 PROJECT_NAME="$(grep ^name Cargo.toml | head -n1 | xargs -n1 | tail -n1)"
 TARGET="../target"
 TARGET_COV="${TARGET}/cov"
@@ -40,11 +61,6 @@ fi
 
 echo "Running as USER=$USER"
 echo "Test should $EXPECTED_RESULT"
-
-Error() {
-    echo "Error:" "$@" >&2
-    exit 1
-}
 
 if ! [ "${OS_NAME:-}" ]; then
     case "$(uname)" in
@@ -116,17 +132,35 @@ run_kcov() {
     COVERALLS_ARG="${TRAVIS_JOB_ID:+--coveralls-id=$TRAVIS_JOB_ID}"
 
     # Build binaries
-    cargo test --no-run -v
+    json_format_args="--quiet --message-format=json"
+
+    # Test binaries
+    cargo_test_args="cargo test --no-run"
+    ${cargo_test_args} -v
+    TEST_BINS="$(${cargo_test_args} ${json_format_args} \
+        | jq -r "select(.profile.test == true) | .filenames[]")"
+
+    # Exaple binaries
+    EXAMPLE_BINS=
     for example in $SIMPLE_RUN_EXAMPLES; do
-        cargo build --example "$example"
+        cargo_build_example_args="cargo build --example $example"
+        ${cargo_build_example_args} -v
+        example_bin="$(${cargo_build_example_args} ${json_format_args} \
+            | jq -r '.executable | strings')"
+        EXAMPLE_BINS="${EXAMPLE_BINS} ${example_bin}"
     done
 
-    EXAMPLE_BINS=$(echo "$SIMPLE_RUN_EXAMPLES" | xargs -n1 | sed "s,^,${TARGET}/${PROFILE}/examples/,")
     mkdir -p "${TARGET_COV}"
 
     (
     set -x
-    for file in ${TARGET}/${PROFILE}/${PROJECT_NAME}-*[^\.d] ${EXAMPLE_BINS} ; do
+
+    pwd
+    ls -l ${TARGET}
+    ls -l ${TARGET}/${PROFILE}
+
+    # Run test and example binaries under kcov
+    for file in ${TEST_BINS} ${EXAMPLE_BINS} ; do
         "$KCOV" \
             $COVERALLS_ARG \
             --include-pattern=capstone-rs \
@@ -144,8 +178,12 @@ cov() {
 
     KCOV=./kcov-install/usr/local/bin/kcov run_kcov
 
-    if [[ "${TRAVIS_JOB_ID:+Z}" = Z ]]; then
-        bash <(curl -s https://codecov.io/bash)
+    if [[ -n "${CI:-}" ]]; then
+        codecov_script="$(mktemp)"
+        curl --silent --show-error "https://codecov.io/bash" \
+            > "${codecov_script}" \
+            || Error "Failed to download codecov script"
+        bash "${codecov_script}" || Error "Codecov script execution failed"
         echo "Uploaded code coverage"
     else
         echo "Not uploading coverage since we are not in a CI job"
@@ -165,7 +203,7 @@ profile_args() {
 }
 
 # Test rust file by making a temporary project
-# Must have a main() function defined
+# Must have a main() function defined, which it reads from stdin
 test_rust_file() {
     (
     tmp_dir="$(mktemp -d /tmp/rust.testdir.XXXXXXXXXX)"
@@ -197,11 +235,10 @@ run_tests() {
     for PROFILE in $PROFILES; do
         echo "Cargo tests without Valgrind"
         cargo_cmd_args=(
-            $(profile_args)
-            $NO_DEFAULT_FEATURES
-            --features "$FEATURES"
             --verbose
-            )
+            $(profile_args)
+            "${CARGO_FEATURE_ARGS[@]}"
+        )
         expect_exit_status "$SHOULD_FAIL" \
             cargo test "${cargo_cmd_args[@]}" \
             --color=always -- --color=always \
@@ -217,7 +254,8 @@ run_tests() {
                 head -n20
         )
 
-        cat README.md | \
+        # Test the example code in README
+        cat ../README.md | \
             sed -n '/^```rust/,/^```/p' | grep -vE '^```' | \
             test_rust_file
 

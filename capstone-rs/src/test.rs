@@ -188,7 +188,7 @@ fn test_detail_true() {
             let detail = cs
                 .insn_detail(&insns[insn_idx])
                 .expect("Unable to get detail");
-            let groups: Vec<_> = detail.groups().collect();
+            let groups = detail.groups();
             for insn_group_id in &insn_group_ids {
                 let insn_group = InsnGroupId(*insn_group_id as InsnGroupIdInt);
                 assert_eq!(groups.contains(&insn_group), false);
@@ -259,12 +259,18 @@ fn test_instruction_detail_helper<T>(
             expected_op
         })
         .collect();
-    assert_eq!(expected_ops, arch_ops, "operands do not match");
+    assert_eq!(
+        expected_ops,
+        arch_ops,
+        "operands do not match for \"{}\" (bytes={:02x?})",
+        insn,
+        insn.bytes()
+    );
 }
 
 /// Assert instruction belongs or does not belong to groups, testing both insn_belongs_to_group
 /// and insn_group_ids
-fn test_instruction_group_helper<R: Into<u32>>(
+fn test_instruction_group_helper<R: Copy + Into<RegId>>(
     cs: &Capstone,
     insn: &Insn,
     mnemonic_name: &str,
@@ -273,14 +279,12 @@ fn test_instruction_group_helper<R: Into<u32>>(
     expected_regs_read: &[R],
     expected_regs_write: &[R],
     has_default_syntax: bool,
-) where
-    R: Into<u32> + Copy,
-{
+) {
     test_instruction_helper(&cs, insn, mnemonic_name, bytes, has_default_syntax);
     let detail = cs.insn_detail(insn).expect("Unable to get detail");
 
     // Assert expected instruction groups is a subset of computed groups through ids
-    let instruction_group_ids: HashSet<InsnGroupId> = detail.groups().collect();
+    let instruction_group_ids: HashSet<InsnGroupId> = detail.groups().iter().copied().collect();
     let expected_groups_ids: HashSet<InsnGroupId> = expected_groups
         .iter()
         .map(|&x| InsnGroupId(x as u8))
@@ -306,12 +310,9 @@ fn test_instruction_group_helper<R: Into<u32>>(
 
     macro_rules! assert_regs_match {
         ($expected:expr, $actual_regs:expr, $msg:expr) => {{
-            let mut expected_regs: Vec<_> = $expected
-                .iter()
-                .map(|x| RegId(x.clone().into() as RegIdInt))
-                .collect();
+            let mut expected_regs: Vec<RegId> = $expected.iter().map(|&x| x.into()).collect();
             expected_regs.sort_unstable();
-            let mut regs: Vec<_> = $actual_regs.collect();
+            let mut regs: Vec<RegId> = $actual_regs.iter().map(|&x| x.into()).collect();
             regs.sort_unstable();
             assert_eq!(expected_regs, regs, $msg);
         }};
@@ -329,13 +330,11 @@ fn test_instruction_group_helper<R: Into<u32>>(
     );
 }
 
-fn instructions_match_group<R>(
+fn instructions_match_group<R: Copy + Into<RegId>>(
     cs: &mut Capstone,
     expected_insns: &[(&str, &[u8], &[cs_group_type::Type], &[R], &[R])],
     has_default_syntax: bool,
-) where
-    R: Into<u32> + Copy,
-{
+) {
     let insns_buf: Vec<u8> = expected_insns
         .iter()
         .flat_map(|&(_, bytes, _, _, _)| bytes)
@@ -348,7 +347,7 @@ fn instructions_match_group<R>(
     let insns = cs
         .disasm_all(&insns_buf, START_TEST_ADDR)
         .expect("Failed to disassemble");
-    let insns: Vec<Insn> = insns.iter().collect();
+    let insns: Vec<&Insn> = insns.iter().collect();
 
     // Check number of instructions
     assert_eq!(insns.len(), expected_insns.len());
@@ -1135,7 +1134,6 @@ fn test_arch_arm64_detail() {
     use crate::arch::arm64::Arm64Reg::*;
     use crate::arch::arm64::Arm64Sysreg::*;
     use crate::arch::arm64::Arm64Vas::*;
-    use crate::arch::arm64::Arm64Vess::*;
     use crate::arch::arm64::*;
     use capstone_sys::arm64_op_mem;
 
@@ -1177,7 +1175,7 @@ fn test_arch_arm64_detail() {
                         ..Default::default()
                     },
                     Arm64Operand {
-                        op_type: RegMrs(ARM64_SYSREG_MIDR_EL1),
+                        op_type: Sys(ARM64_SYSREG_MIDR_EL1 as u32),
                         ..Default::default()
                     },
                 ],
@@ -1259,8 +1257,8 @@ fn test_arch_arm64_detail() {
                     s0.clone(),
                     Arm64Operand {
                         vector_index: Some(3),
-                        vess: ARM64_VESS_S,
                         op_type: Reg(RegId(ARM64_REG_V0 as RegIdInt)),
+                        vas: ARM64_VAS_1S,
                         ..Default::default()
                     },
                 ],
@@ -1276,7 +1274,6 @@ fn test_arch_arm64_detail() {
                     },
                     Arm64Operand {
                         vector_index: Some(1),
-                        vess: ARM64_VESS_D,
                         op_type: Reg(RegId(ARM64_REG_V5 as RegIdInt)),
                         ..Default::default()
                     },
@@ -2201,7 +2198,7 @@ fn test_arch_ppc_detail() {
                 b"\x80\x20\x00\x00",
                 &[
                     Reg(RegId(PPC_REG_R1 as RegIdInt)),
-                    Mem(PpcOpMem(ppc_op_mem { base: 44, disp: 0 })),
+                    Mem(PpcOpMem(ppc_op_mem { base: 0, disp: 0 })),
                 ],
             ),
             // lwz     r1, 0(r31)
@@ -2243,9 +2240,9 @@ fn test_arch_ppc_detail() {
                 "crand",
                 b"\x4c\x43\x22\x02",
                 &[
-                    Reg(RegId(PPC_REG_R2 as RegIdInt)),
-                    Reg(RegId(PPC_REG_R3 as RegIdInt)),
-                    Reg(RegId(PPC_REG_R4 as RegIdInt)),
+                    Reg(RegId(PPC_REG_CR0EQ as RegIdInt)),
+                    Reg(RegId(PPC_REG_CR0UN as RegIdInt)),
+                    Reg(RegId(PPC_REG_CR1LT as RegIdInt)),
                 ],
             ),
             // cmpwi   cr2, r3, 0x80
@@ -2558,7 +2555,7 @@ fn test_arch_tms320c64x_detail() {
         &[
             // add.D1    a11, a4, a3
             DII::new(
-                "      add.D1",
+                "add.D1",
                 b"\x01\xac\x88\x40",
                 &[
                     Reg(RegId(TMS320C64X_REG_A11 as RegIdInt)),
@@ -2578,7 +2575,7 @@ fn test_arch_tms320c64x_detail() {
             ),
             // ldbu.D2T2 *+b15[0x46], b5
             DII::new(
-                "      ldbu.D2T2",
+                "ldbu.D2T2",
                 b"\x02\x80\x46\x9e",
                 &[
                     Mem(Tms320c64xOpMem(tms320c64x_op_mem {
@@ -2594,10 +2591,10 @@ fn test_arch_tms320c64x_detail() {
                 ],
             ),
             // NOP
-            DII::new("      NOP", b"\x00\x00\x00\x00", &[]),
+            DII::new("NOP", b"\x00\x00\x00\x00", &[]),
             // ldbu.D1T2 *++a4[1], b5
             DII::new(
-                "      ldbu.D1T2",
+                "ldbu.D1T2",
                 b"\x02\x90\x32\x96",
                 &[
                     Mem(Tms320c64xOpMem(tms320c64x_op_mem {
@@ -2614,7 +2611,7 @@ fn test_arch_tms320c64x_detail() {
             ),
             // ldbu.D2T2 *+b15[0x46], b5
             DII::new(
-                "      ldbu.D2T2",
+                "ldbu.D2T2",
                 b"\x02\x80\x46\x9e",
                 &[
                     Mem(Tms320c64xOpMem(tms320c64x_op_mem {
@@ -2631,7 +2628,7 @@ fn test_arch_tms320c64x_detail() {
             ),
             // lddw.D1T2 *+a15[4], b11:b10
             DII::new(
-                "      lddw.D1T2",
+                "lddw.D1T2",
                 b"\x05\x3c\x83\xe6",
                 &[
                     Mem(Tms320c64xOpMem(tms320c64x_op_mem {
@@ -2651,7 +2648,7 @@ fn test_arch_tms320c64x_detail() {
             ),
             // ldndw.D1T1        *+a3(a4), a23:a22
             DII::new(
-                "      ldndw.D1T1",
+                "ldndw.D1T1",
                 b"\x0b\x0c\x8b\x24",
                 &[
                     Mem(Tms320c64xOpMem(tms320c64x_op_mem {
@@ -2767,11 +2764,13 @@ fn test_arch_x86_detail() {
                 &[
                     X86Operand {
                         size: 2,
+                        access: Some(RegAccessType::WriteOnly),
                         op_type: Reg(RegId(X86_REG_CX as RegIdInt)),
                         ..Default::default()
                     },
                     X86Operand {
                         size: 2,
+                        access: Some(RegAccessType::ReadOnly),
                         op_type: Mem(X86OpMem(x86_op_mem {
                             segment: 0,
                             base: X86_REG_SI,
@@ -2790,6 +2789,7 @@ fn test_arch_x86_detail() {
                 &[
                     X86Operand {
                         size: 1,
+                        access: Some(RegAccessType::ReadWrite),
                         op_type: Mem(X86OpMem(x86_op_mem {
                             segment: 0,
                             base: X86_REG_BX,
@@ -2801,6 +2801,7 @@ fn test_arch_x86_detail() {
                     },
                     X86Operand {
                         size: 1,
+                        access: Some(RegAccessType::ReadOnly),
                         op_type: Reg(RegId(X86_REG_AL as RegIdInt)),
                         ..Default::default()
                     },
@@ -2812,6 +2813,7 @@ fn test_arch_x86_detail() {
                 b"\xd8\x81\xc6\x34",
                 &[X86Operand {
                     size: 4,
+                    access: Some(RegAccessType::ReadOnly),
                     op_type: Mem(X86OpMem(x86_op_mem {
                         segment: 0,
                         base: X86_REG_BX,
@@ -2829,11 +2831,13 @@ fn test_arch_x86_detail() {
                 &[
                     X86Operand {
                         size: 1,
+                        access: Some(RegAccessType::ReadWrite),
                         op_type: Reg(RegId(X86_REG_AL as RegIdInt)),
                         ..Default::default()
                     },
                     X86Operand {
                         size: 1,
+                        access: Some(RegAccessType::ReadOnly),
                         op_type: Mem(X86OpMem(x86_op_mem {
                             segment: 0,
                             base: X86_REG_BX,
@@ -2867,11 +2871,13 @@ fn test_arch_x86_detail() {
                 &[
                     X86Operand {
                         size: 4,
+                        access: Some(RegAccessType::WriteOnly),
                         op_type: Reg(RegId(X86_REG_ECX as RegIdInt)),
                         ..Default::default()
                     },
                     X86Operand {
                         size: 4,
+                        access: Some(RegAccessType::ReadOnly),
                         op_type: Mem(X86OpMem(x86_op_mem {
                             segment: 0,
                             base: X86_REG_EDX,
@@ -2890,11 +2896,13 @@ fn test_arch_x86_detail() {
                 &[
                     X86Operand {
                         size: 4,
+                        access: Some(RegAccessType::ReadWrite),
                         op_type: Reg(RegId(X86_REG_EAX as RegIdInt)),
                         ..Default::default()
                     },
                     X86Operand {
                         size: 4,
+                        access: Some(RegAccessType::ReadOnly),
                         op_type: Reg(RegId(X86_REG_EBX as RegIdInt)),
                         ..Default::default()
                     },
@@ -2907,11 +2915,13 @@ fn test_arch_x86_detail() {
                 &[
                     X86Operand {
                         size: 4,
+                        access: Some(RegAccessType::ReadWrite),
                         op_type: Reg(RegId(X86_REG_ESI as RegIdInt)),
                         ..Default::default()
                     },
                     X86Operand {
                         size: 4,
+                        access: None,
                         op_type: Imm(0x1234),
                         ..Default::default()
                     },
@@ -2938,6 +2948,7 @@ fn test_arch_x86_detail() {
                 b"\x55",
                 &[X86Operand {
                     size: 8,
+                    access: Some(RegAccessType::ReadOnly),
                     op_type: Reg(RegId(X86_REG_RBP as RegIdInt)),
                     ..Default::default()
                 }],
@@ -2949,11 +2960,13 @@ fn test_arch_x86_detail() {
                 &[
                     X86Operand {
                         size: 8,
+                        access: Some(RegAccessType::WriteOnly),
                         op_type: Reg(RegId(X86_REG_RAX as RegIdInt)),
                         ..Default::default()
                     },
                     X86Operand {
                         size: 8,
+                        access: Some(RegAccessType::ReadOnly),
                         op_type: Mem(X86OpMem(x86_op_mem {
                             segment: 0,
                             base: X86_REG_RIP,
@@ -3111,4 +3124,168 @@ fn test_arch_xcore_detail() {
             ),
         ],
     );
+}
+
+#[test]
+fn test_arch_riscv() {
+    test_arch_mode_endian_insns(
+        &mut Capstone::new()
+            .riscv()
+            .mode(riscv::ArchMode::RiscV64)
+            .extra_mode([riscv::ArchExtraMode::RiscVC].iter().map(|x| *x))
+            .build()
+            .unwrap(),
+        Arch::RISCV,
+        Mode::RiscV64,
+        None,
+        &[ExtraMode::RiscVC],
+        &[
+            ("addi", b"\x93\x00\x31\x00"),
+            ("add", b"\xb3\x00\x31\x00"),
+            ("ld", b"\x03\xb2\x82\x00"),
+            ("c.ebreak", b"\x02\x90"),
+            ("c.addi", b"\x05\x04"),
+            ("c.add", b"\x2a\x94"),
+            ("c.ld", b"\x0c\x66"),
+        ],
+    );
+}
+
+#[test]
+fn test_arch_riscv_detail() {
+    use crate::arch::riscv::RiscVOperand::*;
+    use crate::arch::riscv::RiscVReg::*;
+    use crate::arch::riscv::*;
+    use capstone_sys::riscv_op_mem;
+
+    test_arch_mode_endian_insns_detail(
+        &mut Capstone::new()
+            .riscv()
+            .mode(riscv::ArchMode::RiscV64)
+            .extra_mode([riscv::ArchExtraMode::RiscVC].iter().map(|x| *x))
+            .build()
+            .unwrap(),
+        Arch::RISCV,
+        Mode::RiscV64,
+        None,
+        &[ExtraMode::RiscVC],
+        &[
+            // addi x1, x2, 3
+            DII::new(
+                "addi",
+                b"\x93\x00\x31\x00",
+                &[
+                    Reg(RegId(RISCV_REG_X1 as RegIdInt)),
+                    Reg(RegId(RISCV_REG_X2 as RegIdInt)),
+                    Imm(3),
+                ],
+            ),
+            // add x1, x2, x3
+            DII::new(
+                "add",
+                b"\xb3\x00\x31\x00",
+                &[
+                    Reg(RegId(RISCV_REG_X1 as RegIdInt)),
+                    Reg(RegId(RISCV_REG_X2 as RegIdInt)),
+                    Reg(RegId(RISCV_REG_X3 as RegIdInt)),
+                ],
+            ),
+            // ld x4, 8(x5)
+            DII::new(
+                "ld",
+                b"\x03\xb2\x82\x00",
+                &[
+                    Reg(RegId(RISCV_REG_X4 as RegIdInt)),
+                    Mem(RiscVOpMem(riscv_op_mem {
+                        base: RISCV_REG_X5,
+                        disp: 8,
+                    })),
+                ],
+            ),
+            // c.ebreak
+            DII::new("c.ebreak", b"\x02\x90", &[]),
+            // c.addi x8, 1
+            DII::new(
+                "c.addi",
+                b"\x05\x04",
+                &[Reg(RegId(RISCV_REG_X8 as RegIdInt)), Imm(1)],
+            ),
+            // c.add x8, x10
+            DII::new(
+                "c.add",
+                b"\x2a\x94",
+                &[
+                    Reg(RegId(RISCV_REG_X8 as RegIdInt)),
+                    Reg(RegId(RISCV_REG_X10 as RegIdInt)),
+                ],
+            ),
+            // c.ld x11, 8(x12)
+            DII::new(
+                "c.ld",
+                b"\x0c\x66",
+                &[
+                    // Upstream bug? Doesn't seem to use Mem type.
+                    Reg(RegId(RISCV_REG_X11 as RegIdInt)),
+                    Imm(8),
+                    Reg(RegId(RISCV_REG_X12 as RegIdInt)),
+                ],
+            ),
+        ],
+    );
+}
+
+#[test]
+fn test_insn_size_and_alignment() {
+    use capstone_sys::cs_insn;
+
+    // Ensure that Insn and cs_insn have the same size
+    // and alignment so that they can be safely transmuted
+    // from and to each other:
+
+    assert_eq!(
+        core::mem::size_of::<Insn>(),
+        core::mem::size_of::<cs_insn>(),
+        "sizeof(Insn) == sizeof(cs_insn)"
+    );
+
+    assert_eq!(
+        core::mem::align_of::<Insn>(),
+        core::mem::align_of::<cs_insn>(),
+        "alignof(Insn) == alignof(cs_insn)"
+    );
+
+    // Make sure that conversion is valid:
+
+    let mut cs = Capstone::new()
+        .x86()
+        .mode(x86::ArchMode::Mode64)
+        .build()
+        .unwrap();
+    cs.set_detail(false).unwrap();
+    let insns = cs.disasm_all(X86_CODE, START_TEST_ADDR).unwrap();
+    let insns_slice: &[Insn] = &insns;
+
+    assert_eq!(insns.len(), insns_slice.len());
+
+    for (original, transmuted) in insns.iter().zip(insns_slice.iter()) {
+        assert_eq!(original.id(), transmuted.id());
+    }
+}
+
+#[test]
+fn test_insn_from_raw() {
+    use capstone_sys::cs_insn;
+
+    let cs = Capstone::new()
+        .x86()
+        .mode(x86::ArchMode::Mode64)
+        .build()
+        .unwrap();
+
+    let insns = cs.disasm_all(X86_CODE, START_TEST_ADDR).unwrap();
+    for insn in insns.iter() {
+        let raw_insn = &insn.insn as *const cs_insn;
+        let from_raw_insn = unsafe { Insn::from_raw(raw_insn) };
+        assert_eq!(format!("{:?}", from_raw_insn), format!("{:?}", insn));
+    }
 }

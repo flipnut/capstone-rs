@@ -1,5 +1,7 @@
+use core::convert::{TryFrom, TryInto};
 use core::fmt::{self, Debug, Display, Error, Formatter};
 use core::marker::PhantomData;
+use core::ops::Deref;
 use core::slice;
 use core::str;
 
@@ -10,7 +12,18 @@ use crate::constants::Arch;
 use crate::ffi::str_from_cstr_ptr;
 use crate::CsResult;
 
-/// Representation of the array of instructions returned by disasm
+/// Represents a slice of [`Insn`] returned by [`Capstone`](crate::Capstone) `disasm*()` methods.
+///
+/// To access inner [`&[Insn]`](Insn), use [`.as_ref()`](AsRef::as_ref).
+/// ```
+/// # use capstone::Instructions;
+/// # use capstone::prelude::*;
+/// # let cs = Capstone::new().x86().mode(arch::x86::ArchMode::Mode32).build().unwrap();
+/// let insns: Instructions = cs.disasm_all(b"\x55\x48\x8b\x05", 0x1000).unwrap();
+/// for insn in insns.as_ref() {
+///     println!("{}", insn);
+/// }
+/// ```
 #[derive(Debug)]
 pub struct Instructions<'a>(&'a mut [cs_insn]);
 
@@ -18,6 +31,8 @@ pub struct Instructions<'a>(&'a mut [cs_insn]);
 pub type InsnIdInt = u32;
 
 /// Represents an instruction id, which may be architecture-specific.
+///
+/// To translate to a human-readable name, see [`Capstone::insn_name()`](crate::Capstone::insn_name).
 #[derive(Copy, Clone, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub struct InsnId(pub InsnIdInt);
 
@@ -25,7 +40,10 @@ pub struct InsnId(pub InsnIdInt);
 pub type InsnGroupIdInt = u8;
 
 /// Represents the group an instruction belongs to, which may be architecture-specific.
+///
+/// To translate to a human-readable name, see [`Capstone::group_name()`](crate::Capstone::group_name).
 #[derive(Copy, Clone, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
+#[repr(transparent)]
 pub struct InsnGroupId(pub InsnGroupIdInt);
 
 pub use capstone_sys::cs_group_type as InsnGroupType;
@@ -34,8 +52,74 @@ pub use capstone_sys::cs_group_type as InsnGroupType;
 pub type RegIdInt = u16;
 
 /// Represents an register id, which is architecture-specific.
+///
+/// To translate to a human-readable name, see [`Capstone::reg_name()`](crate::Capstone::reg_name).
 #[derive(Copy, Clone, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
+#[repr(transparent)]
 pub struct RegId(pub RegIdInt);
+
+impl RegId {
+    /// Invalid Register
+    pub const INVALID_REG: Self = Self(0);
+}
+
+impl core::convert::From<u32> for RegId {
+    fn from(v: u32) -> RegId {
+        RegId(v.try_into().ok().unwrap_or(Self::INVALID_REG.0))
+    }
+}
+
+/// Represents how the register is accessed.
+#[derive(Copy, Clone, Debug, Hash, PartialEq, Eq)]
+pub enum RegAccessType {
+    /// Operand read from memory or register.
+    ReadOnly,
+    /// Operand write from memory or register.
+    WriteOnly,
+    /// Operand read and write from memory or register.
+    ReadWrite,
+}
+
+impl RegAccessType {
+    /// Returns whether the instruction reads from the operand.
+    ///
+    /// Note that an instruction may read and write to the register
+    /// simultaneously. In this case, the operand is also considered as
+    /// readable.
+    pub fn is_readable(self) -> bool {
+        self == RegAccessType::ReadOnly || self == RegAccessType::ReadWrite
+    }
+
+    /// Returns whether the instruction writes from the operand.
+    ///
+    /// Note that an instruction may read and write to the register
+    /// simultaneously. In this case, the operand is also considered as
+    /// writable.
+    pub fn is_writable(self) -> bool {
+        self == RegAccessType::WriteOnly || self == RegAccessType::ReadWrite
+    }
+}
+
+impl TryFrom<cs_ac_type> for RegAccessType {
+    type Error = ();
+
+    fn try_from(access: cs_ac_type) -> Result<Self, Self::Error> {
+        // Check for flags other than CS_AC_READ or CS_AC_WRITE.
+        let unknown_flag_mask = !(CS_AC_READ | CS_AC_WRITE).0;
+        if (access.0 & unknown_flag_mask) != 0 {
+            return Err(());
+        }
+
+        let is_readable = (access & CS_AC_READ).0 != 0;
+        let is_writable = (access & CS_AC_WRITE).0 != 0;
+        match (is_readable, is_writable) {
+            (true, false) => Ok(RegAccessType::ReadOnly),
+            (false, true) => Ok(RegAccessType::WriteOnly),
+            (true, true) => Ok(RegAccessType::ReadWrite),
+            _ => Err(()),
+        }
+    }
+}
 
 impl<'a> Instructions<'a> {
     pub(crate) unsafe fn from_raw_parts(ptr: *mut cs_insn, len: usize) -> Instructions<'a> {
@@ -45,20 +129,22 @@ impl<'a> Instructions<'a> {
     pub(crate) fn new_empty() -> Instructions<'a> {
         Instructions(&mut [])
     }
+}
 
-    /// Get number of instructions
-    pub fn len(&self) -> usize {
-        self.0.len()
+impl<'a> core::ops::Deref for Instructions<'a> {
+    type Target = [Insn<'a>];
+
+    #[inline]
+    fn deref(&self) -> &[Insn<'a>] {
+        // SAFETY: `cs_insn` has the same memory layout as `Insn`
+        unsafe { &*(self.0 as *const [cs_insn] as *const [Insn]) }
     }
+}
 
-    /// Iterator over instructions
-    pub fn iter(&'a self) -> InstructionIterator<'a> {
-        let iter = self.0.iter();
-        InstructionIterator(iter)
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.len() == 0
+impl<'a> AsRef<[Insn<'a>]> for Instructions<'a> {
+    #[inline]
+    fn as_ref(&self) -> &[Insn<'a>] {
+        self.deref()
     }
 }
 
@@ -72,66 +158,13 @@ impl<'a> Drop for Instructions<'a> {
     }
 }
 
-/// impl Iterator (and variants) for a type that wraps slice::iterator
+/// A single disassembled CPU instruction.
 ///
-/// Implements Iterator, ExactSizeIterator, and DoubleEndedIterator
-macro_rules! impl_SliceIterator_wrapper {
-    (
-        impl <$( $lifetime:tt ),*> Iterator for $iterator:ty {
-            type Item = $item:ty;
-            [ $next:expr ]
-        }
-    ) => {
-        impl <$( $lifetime ),*> Iterator for $iterator {
-            type Item = $item;
-
-            #[inline]
-            fn next(&mut self) -> Option<Self::Item> {
-                self.0.next().map($next)
-            }
-
-            #[inline]
-            fn size_hint(&self) -> (usize, Option<usize>) {
-                self.0.size_hint()
-            }
-
-            #[inline]
-            fn count(self) -> usize {
-                self.0.count()
-            }
-        }
-
-        impl<'a> ExactSizeIterator for $iterator {
-            #[inline]
-            fn len(&self) -> usize {
-                self.0.len()
-            }
-        }
-
-        impl<'a> DoubleEndedIterator for $iterator {
-            #[inline]
-            fn next_back(&mut self) -> Option<Self::Item> {
-                self.0.next_back().map($next)
-            }
-        }
-    }
-}
-
-/// An iterator over the instructions returned by disasm
+/// # Detail
 ///
-/// This is currently the only supported interface for reading them.
-pub struct InstructionIterator<'a>(slice::Iter<'a, cs_insn>);
-
-impl_SliceIterator_wrapper!(
-    impl<'a> Iterator for InstructionIterator<'a> {
-        type Item = Insn<'a>;
-        [
-            |x| Insn { insn: *x, _marker: PhantomData }
-        ]
-    }
-);
-
-/// A wrapper for the raw capstone-sys instruction
+/// To learn how to get more instruction details, see [`InsnDetail`].
+#[derive(Clone)]
+#[repr(transparent)]
 pub struct Insn<'a> {
     /// Inner `cs_insn`
     pub(crate) insn: cs_insn,
@@ -140,10 +173,35 @@ pub struct Insn<'a> {
     pub(crate) _marker: PhantomData<&'a InsnDetail<'a>>,
 }
 
-/// Contains architecture-independent details about an instruction, such as register reads.
+/// Contains architecture-independent details about an [`Insn`].
 ///
-/// To get additional architecture-specific information, use the `arch_detail()` method to get an
-/// `ArchDetail` enum.
+/// To get more detail about the instruction, enable extra details for the
+/// [`Capstone`](crate::Capstone) instance with
+/// [`Capstone::set_detail(True)`](crate::Capstone::set_detail) and use
+/// [`Capstone::insn_detail()`](crate::Capstone::insn_detail).
+///
+/// ```
+/// # use capstone::Instructions;
+/// # use capstone::prelude::*;
+/// let cs = Capstone::new()
+///     .x86()
+///     .mode(arch::x86::ArchMode::Mode32)
+///     .detail(true) // needed to enable detail
+///     .build()
+///     .unwrap();
+/// let insns = cs.disasm_all(b"\x90", 0x1000).unwrap();
+/// for insn in insns.as_ref() {
+///     println!("{}", insn);
+///     let insn_detail: InsnDetail = cs.insn_detail(insn).unwrap();
+///     println!("    {:?}", insn_detail.groups());
+/// }
+/// ```
+///
+/// # Arch-specific detail
+///
+/// To get additional architecture-specific information, use the
+/// [`.arch_detail()`](Self::arch_detail) method to get an `ArchDetail` enum.
+///
 pub struct InsnDetail<'a>(pub(crate) &'a cs_detail, pub(crate) Arch);
 
 // Can't derive `PartialEq` and `Eq` because `regs_read` and `regs_write` are bigger than 32
@@ -157,6 +215,24 @@ pub struct InsnRegsAccess {
 }
 
 impl<'a> Insn<'a> {
+    /// Create an `Insn` from a raw pointer to a [`capstone_sys::cs_insn`].
+    ///
+    /// This function serves to allow integration with libraries which generate `capstone_sys::cs_insn`'s internally.
+    ///
+    /// # Safety
+    ///
+    /// Note that this function is unsafe, and assumes that you know what you are doing. In
+    /// particular, it generates a lifetime for the `Insn` from nothing, and that lifetime is in
+    /// no-way actually tied to the cs_insn itself. It is the responsibility of the caller to
+    /// ensure that the resulting `Insn` lives only as long as the `cs_insn`. This function
+    /// assumes that the pointer passed is non-null and a valid `cs_insn` pointer.
+    pub unsafe fn from_raw(insn: *const cs_insn) -> Self {
+        Self {
+            insn: *insn,
+            _marker: PhantomData,
+        }
+    }
+
     /// The mnemonic for the instruction
     pub fn mnemonic(&self) -> Option<&str> {
         unsafe { str_from_cstr_ptr(self.insn.mnemonic.as_ptr()) }
@@ -231,85 +307,33 @@ impl<'a> Display for Insn<'a> {
     }
 }
 
-/// Iterator over registers ids
-#[derive(Debug, Clone)]
-pub struct RegsIter<'a, T: 'a + Into<RegIdInt> + Copy>(slice::Iter<'a, T>);
-
-impl<'a, T: 'a + Into<RegIdInt> + Copy> Iterator for RegsIter<'a, T> {
-    type Item = RegId;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        self.0.next().map(|x| RegId((*x).into()))
-    }
-
-    #[inline]
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        self.0.size_hint()
-    }
-
-    #[inline]
-    fn count(self) -> usize {
-        self.0.count()
-    }
-}
-
-impl<'a, T: 'a + Into<RegIdInt> + Copy> ExactSizeIterator for RegsIter<'a, T> {
-    #[inline]
-    fn len(&self) -> usize {
-        self.0.len()
-    }
-}
-
-impl<'a, T: 'a + Into<RegIdInt> + Copy> DoubleEndedIterator for RegsIter<'a, T> {
-    #[inline]
-    fn next_back(&mut self) -> Option<Self::Item> {
-        self.0.next_back().map(|x| RegId((*x).into()))
-    }
-}
-
 /// Iterator over instruction group ids
 #[derive(Debug, Clone)]
 pub struct InsnGroupIter<'a>(slice::Iter<'a, InsnGroupIdInt>);
 
-impl_SliceIterator_wrapper!(
-    impl<'a> Iterator for InsnGroupIter<'a> {
-        type Item = InsnGroupId;
-
-        [
-            |x| InsnGroupId(*x as InsnGroupIdInt)
-        ]
-    }
-);
-
 impl<'a> InsnDetail<'a> {
     /// Returns the implicit read registers
-    pub fn regs_read(&self) -> RegsIter<RegIdInt> {
-        RegsIter((*self.0).regs_read[..self.regs_read_count() as usize].iter())
-    }
-
-    /// Returns the number of implicit read registers
-    pub fn regs_read_count(&self) -> u8 {
-        (*self.0).regs_read_count
+    pub fn regs_read(&self) -> &[RegId] {
+        unsafe {
+            &*(&self.0.regs_read[..self.0.regs_read_count as usize] as *const [RegIdInt]
+                as *const [RegId])
+        }
     }
 
     /// Returns the implicit write registers
-    pub fn regs_write(&self) -> RegsIter<RegIdInt> {
-        RegsIter((*self.0).regs_write[..self.regs_write_count() as usize].iter())
-    }
-
-    /// Returns the number of implicit write registers
-    pub fn regs_write_count(&self) -> u8 {
-        (*self.0).regs_write_count
+    pub fn regs_write(&self) -> &[RegId] {
+        unsafe {
+            &*(&self.0.regs_write[..self.0.regs_write_count as usize] as *const [RegIdInt]
+                as *const [RegId])
+        }
     }
 
     /// Returns the groups to which this instruction belongs
-    pub fn groups(&self) -> InsnGroupIter {
-        InsnGroupIter((*self.0).groups[..self.groups_count() as usize].iter())
-    }
-
-    /// Returns the number groups to which this instruction belongs
-    pub fn groups_count(&self) -> u8 {
-        (*self.0).groups_count
+    pub fn groups(&self) -> &[InsnGroupId] {
+        unsafe {
+            &*(&self.0.groups[..self.0.groups_count as usize] as *const [InsnGroupIdInt]
+                as *const [InsnGroupId])
+        }
     }
 
     /// Architecture-specific detail
@@ -340,6 +364,7 @@ impl<'a> InsnDetail<'a> {
             [M68K, M68kDetail, M68kInsnDetail, m68k]
             [MIPS, MipsDetail, MipsInsnDetail, mips]
             [PPC, PpcDetail, PpcInsnDetail, ppc]
+            [RISCV, RiscVDetail, RiscVInsnDetail, riscv]
             [SPARC, SparcDetail, SparcInsnDetail, sparc]
             [TMS320C64X, Tms320c64xDetail, Tms320c64xInsnDetail, tms320c64x]
             [X86, X86Detail, X86InsnDetail, x86]
@@ -415,11 +440,8 @@ impl<'a> Debug for InsnDetail<'a> {
     fn fmt(&self, fmt: &mut Formatter) -> fmt::Result {
         fmt.debug_struct("Detail")
             .field("regs_read", &self.regs_read())
-            .field("regs_read_count", &self.regs_read_count())
             .field("regs_write", &self.regs_write())
-            .field("regs_write_count", &self.regs_write_count())
             .field("groups", &self.groups())
-            .field("groups_count", &self.groups_count())
             .finish()
     }
 }
@@ -444,5 +466,15 @@ impl<'a> Display for Instructions<'a> {
             writeln!(fmt)?;
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn test_invalid_reg_access() {
+        assert_eq!(RegAccessType::try_from(cs_ac_type(1337)), Err(()));
     }
 }

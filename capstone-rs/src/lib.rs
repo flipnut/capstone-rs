@@ -14,27 +14,19 @@
 //! const X86_CODE: &'static [u8] = b"\x55\x48\x8b\x05\xb8\x13\x00\x00\xe9\x14\x9e\x08\x00\x45\x31\xe4";
 //!
 //! /// Print register names
-//! fn reg_names<T, I>(cs: &Capstone, regs: T) -> String
-//! where
-//!     T: Iterator<Item = I>,
-//!     I: Into<RegId>,
-//! {
-//!     let names: Vec<String> = regs.map(|x| cs.reg_name(x.into()).unwrap()).collect();
+//! fn reg_names(cs: &Capstone, regs: &[RegId]) -> String {
+//!     let names: Vec<String> = regs.iter().map(|&x| cs.reg_name(x).unwrap()).collect();
 //!     names.join(", ")
 //! }
 //!
 //! /// Print instruction group names
-//! fn group_names<T, I>(cs: &Capstone, regs: T) -> String
-//! where
-//!     T: Iterator<Item = I>,
-//!     I: Into<InsnGroupId>,
-//! {
-//!     let names: Vec<String> = regs.map(|x| cs.group_name(x.into()).unwrap()).collect();
+//! fn group_names(cs: &Capstone, regs: &[InsnGroupId]) -> String {
+//!     let names: Vec<String> = regs.iter().map(|&x| cs.group_name(x).unwrap()).collect();
 //!     names.join(", ")
 //! }
 //!
 //! fn main() {
-//!     let mut cs = Capstone::new()
+//!     let cs = Capstone::new()
 //!         .x86()
 //!         .mode(arch::x86::ArchMode::Mode64)
 //!         .syntax(arch::x86::ArchSyntax::Att)
@@ -45,7 +37,7 @@
 //!     let insns = cs.disasm_all(X86_CODE, 0x1000)
 //!         .expect("Failed to disassemble");
 //!     println!("Found {} instructions", insns.len());
-//!     for i in insns.iter() {
+//!     for i in insns.as_ref() {
 //!         println!();
 //!         println!("{}", i);
 //!
@@ -123,6 +115,8 @@
 
 #![no_std]
 
+// The `vec` macro cannot be imported directly since it conflicts with the `vec` module
+#[allow(unused_imports)]
 #[macro_use]
 extern crate alloc;
 
