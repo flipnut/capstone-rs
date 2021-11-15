@@ -307,6 +307,42 @@ impl<'a> Display for Insn<'a> {
     }
 }
 
+/// Iterator over registers ids
+#[derive(Debug, Clone)]
+pub struct RegsIter<'a, T: 'a + Into<RegIdInt> + Copy>(slice::Iter<'a, T>);
+
+impl<'a, T: 'a + Into<RegIdInt> + Copy> Iterator for RegsIter<'a, T> {
+    type Item = RegId;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.0.next().map(|x| RegId((*x).into()))
+    }
+
+    #[inline]
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.0.size_hint()
+    }
+
+    #[inline]
+    fn count(self) -> usize {
+        self.0.count()
+    }
+}
+
+impl<'a, T: 'a + Into<RegIdInt> + Copy> ExactSizeIterator for RegsIter<'a, T> {
+    #[inline]
+    fn len(&self) -> usize {
+        self.0.len()
+    }
+}
+
+impl<'a, T: 'a + Into<RegIdInt> + Copy> DoubleEndedIterator for RegsIter<'a, T> {
+    #[inline]
+    fn next_back(&mut self) -> Option<Self::Item> {
+        self.0.next_back().map(|x| RegId((*x).into()))
+    }
+}
+
 /// Iterator over instruction group ids
 #[derive(Debug, Clone)]
 pub struct InsnGroupIter<'a>(slice::Iter<'a, InsnGroupIdInt>);
