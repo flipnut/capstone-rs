@@ -113,6 +113,8 @@ static const name_map reg_name_maps[] = {
 	{ RISCV_REG_F30_64, "ft10" },
 	{ RISCV_REG_F31_32, "ft11" },
 	{ RISCV_REG_F31_64, "ft11" },
+
+	{ RISCV_REG_PC, "pc" },
 };
 #endif
 
