@@ -347,6 +347,8 @@ riscv_reg RISCV_map_register(unsigned int r)
 		RISCV_REG_F30_64,
 		RISCV_REG_F31_32,
 		RISCV_REG_F31_64,
+
+		RISCV_REG_PC,
 	};
 
 	if (r < ARR_SIZE(map))

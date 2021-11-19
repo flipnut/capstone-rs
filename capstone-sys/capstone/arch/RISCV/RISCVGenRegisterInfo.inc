@@ -111,7 +111,8 @@ enum {
   RISCV_F30_64 = 94,
   RISCV_F31_32 = 95,
   RISCV_F31_64 = 96,
-  RISCV_NUM_TARGET_REGS 	// 97
+  RISCV_PC = 97,
+  RISCV_NUM_TARGET_REGS 	// 98
 };
 
 // Register classes
