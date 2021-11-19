@@ -356,4 +356,72 @@ riscv_reg RISCV_map_register(unsigned int r)
 	return 0;
 }
 
+void RISCV_reg_access(const cs_insn *insn,
+		cs_regs regs_read, uint8_t *regs_read_count,
+		cs_regs regs_write, uint8_t *regs_write_count)
+{
+	uint8_t i;
+	uint8_t read_count, write_count;
+	cs_riscv *riscv = &(insn->detail->riscv);
+
+	read_count = insn->detail->regs_read_count;
+	write_count = insn->detail->regs_write_count;
+
+	// implicit registers
+	memcpy(regs_read, insn->detail->regs_read, read_count * sizeof(insn->detail->regs_read[0]));
+	memcpy(regs_write, insn->detail->regs_write, write_count * sizeof(insn->detail->regs_write[0]));
+
+	if (insn->id >= RISCV_INS_BEQ && insn->id <= RISCV_INS_BNE) {
+		regs_write[write_count] = (uint16_t)RISCV_REG_PC;
+		write_count++;
+	}
+
+	if (insn->id == RISCV_INS_AUIPC) {
+		regs_read[read_count] = (uint16_t)RISCV_REG_PC;
+		read_count++;
+	}
+
+	if (insn->id == RISCV_INS_JAL || insn->id == RISCV_INS_JALR) {
+		regs_write[write_count] = (uint16_t)RISCV_REG_PC;
+		write_count++;
+	}
+
+	// explicit registers
+	for (i = 0; i < riscv->op_count; i++) {
+		cs_riscv_op *op = &(riscv->operands[i]);
+		switch((int)op->type) {
+			case RISCV_OP_REG:
+				if (insn->id >= RISCV_INS_BEQ && insn->id <= RISCV_INS_BNE) {
+					if(!arr_exist(regs_read, read_count, op->reg)) {
+							regs_read[read_count] = (uint16_t)op->reg;
+							read_count++;
+						}
+				} else {
+					if (i == 0) {
+						if(!arr_exist(regs_write, write_count, op->reg)) {
+							regs_write[write_count] = (uint16_t)op->reg;
+							write_count++;
+						}
+					} else {
+						if(!arr_exist(regs_read, read_count, op->reg)) {
+							regs_read[read_count] = (uint16_t)op->reg;
+							read_count++;
+						}
+					}
+				}
+				break;
+			case RISCV_OP_MEM:
+				// registers appeared in memory references always being read
+				if ((op->mem.base != RISCV_REG_INVALID) && !arr_exist(regs_read, read_count, op->mem.base)) {
+					regs_read[read_count] = (uint16_t)op->mem.base;
+					read_count++;
+				}
+			default:
+				break;
+		}
+	}
+	*regs_read_count = read_count;
+	*regs_write_count = write_count;
+}
+
 #endif

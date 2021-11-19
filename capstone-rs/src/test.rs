@@ -502,6 +502,79 @@ fn test_insns_match(cs: &mut Capstone, insns: &[(&str, &[u8])]) {
 }
 
 #[test]
+fn test_instruction_reg_access_rv64() {
+    //use crate::Mode::RiscV64;
+    use crate::arch::riscv::*;
+    use crate::test::riscv::ArchMode::RiscV64;
+    use capstone_sys::riscv_reg::*;
+
+    let cs = Capstone::new()
+        .riscv()
+        .mode(RiscV64)
+        .detail(true)
+        .build()
+        .unwrap();
+
+    let expected: &[(&[u8], &[_], &[_])] = &[
+        // div  t2,t0,t1
+        (
+            //b"\x02\x62\xc3\xb3",
+            b"\xb3\xc3\x62\x02",
+            &[RISCV_REG_T0, RISCV_REG_T1],
+            &[RISCV_REG_T2],
+        ),
+        // lui t0, 0x1
+        (b"\xb7\x12\x00\x00", &[], &[RISCV_REG_T0]),
+        // j mit offset (???)
+        (b"\x6f\x00\xc0\x00", &[], &[RISCV_REG_PC]),
+        // jal t0,. -4
+        (b"\xef\xf2\xdf\xff", &[], &[RISCV_REG_PC, RISCV_REG_T0]),
+        // bne t1,t2,.-4
+        (
+            b"\xe3\x1e\x73\xfe",
+            &[RISCV_REG_T1, RISCV_REG_T2],
+            &[RISCV_REG_PC],
+        ),
+        // ret
+        (b"\x67\x80\x00\x00", &[], &[RISCV_REG_PC]),
+    ];
+
+    macro_rules! assert_regs_match {
+        ($expected:expr, $actual_regs:expr, $msg:expr) => {{
+            assert_eq!($expected.len(), $actual_regs.len(), $msg);
+
+            for (expected, actual) in $expected.iter().zip($actual_regs) {
+                println!(
+                    "expected = {:?}, actual = {:?}",
+                    cs.reg_name(RegId(*expected as u16)),
+                    cs.reg_name(actual)
+                );
+                assert_eq!(*expected, actual.0 as u32, $msg);
+            }
+        }};
+    }
+
+    for (code, regs_read, regs_write) in expected {
+        let insns = cs.disasm_count(code, START_TEST_ADDR, 1).unwrap();
+        let insn = insns.iter().next().unwrap();
+        let access = cs.insn_regs_access(&insn).unwrap();
+
+        assert_eq!(
+            regs_read.len(),
+            access.regs_read_count() as usize,
+            "regs_read_count did not match"
+        );
+        assert_regs_match!(regs_read, access.regs_read(), "read_regs did not match");
+
+        assert_eq!(
+            regs_write.len(),
+            access.regs_write_count() as usize,
+            "regs_write_count did not match"
+        );
+        assert_regs_match!(regs_write, access.regs_write(), "regs_write did not match");
+    }
+}
+#[test]
 fn test_instruction_register_access() {
     use crate::arch::x86::X86Reg::*;
 
@@ -559,10 +632,18 @@ fn test_instruction_register_access() {
         let insn = insns.iter().next().unwrap();
         let access = cs.insn_regs_access(&insn).unwrap();
 
-        assert_eq!(regs_read.len(), access.regs_read_count() as usize, "regs_read_count did not match");
+        assert_eq!(
+            regs_read.len(),
+            access.regs_read_count() as usize,
+            "regs_read_count did not match"
+        );
         assert_regs_match!(regs_read, access.regs_read(), "read_regs did not match");
 
-        assert_eq!(regs_write.len(), access.regs_write_count() as usize, "regs_write_count did not match");
+        assert_eq!(
+            regs_write.len(),
+            access.regs_write_count() as usize,
+            "regs_write_count did not match"
+        );
         assert_regs_match!(regs_write, access.regs_write(), "regs_write did not match");
     }
 }

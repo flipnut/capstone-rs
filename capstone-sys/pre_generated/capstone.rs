@@ -14861,7 +14861,8 @@ pub mod riscv_reg {
     pub const RISCV_REG_F30_64: Type = 94;
     pub const RISCV_REG_F31_32: Type = 95;
     pub const RISCV_REG_F31_64: Type = 96;
-    pub const RISCV_REG_ENDING: Type = 97;
+    pub const RISCV_REG_PC: Type = 97;
+    pub const RISCV_REG_ENDING: Type = 98;
 }
 #[repr(u32)]
 #[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]

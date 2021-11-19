@@ -193,6 +193,8 @@ typedef enum riscv_reg {
 	RISCV_REG_F30_64,		// "ft10"
 	RISCV_REG_F31_32,		// "ft11"
 	RISCV_REG_F31_64,		// "ft11"
+
+  RISCV_REG_PC,
 	
 	RISCV_REG_ENDING,		// <-- mark the end of the list or registers
 } riscv_reg;
