@@ -4,18 +4,19 @@ use core::convert::From;
 use core::convert::TryInto;
 use core::{cmp, fmt, slice};
 
-use capstone_sys::{
-    cs_ac_type, cs_x86, cs_x86_op, cs_x86_op__bindgen_ty_1, x86_op_mem, x86_op_type,
-};
-pub use capstone_sys::x86_insn_group as X86InsnGroup;
-pub use capstone_sys::x86_insn as X86Insn;
-pub use capstone_sys::x86_reg as X86Reg;
-pub use capstone_sys::x86_prefix as X86Prefix;
 pub use capstone_sys::x86_avx_bcast as X86AvxBcast;
-pub use capstone_sys::x86_sse_cc as X86SseCC;
 pub use capstone_sys::x86_avx_cc as X86AvxCC;
-pub use capstone_sys::x86_xop_cc as X86XopCC;
 pub use capstone_sys::x86_avx_rm as X86AvxRm;
+pub use capstone_sys::x86_insn as X86Insn;
+pub use capstone_sys::x86_insn_group as X86InsnGroup;
+pub use capstone_sys::x86_prefix as X86Prefix;
+pub use capstone_sys::x86_reg as X86Reg;
+pub use capstone_sys::x86_sse_cc as X86SseCC;
+pub use capstone_sys::x86_xop_cc as X86XopCC;
+use capstone_sys::{
+    cs_ac_type, cs_x86, cs_x86_encoding, cs_x86_op, cs_x86_op__bindgen_ty_1, x86_op_mem,
+    x86_op_type,
+};
 
 pub use crate::arch::arch_builder::x86::*;
 use crate::arch::DetailsArchInsn;
@@ -24,8 +25,7 @@ use crate::instruction::{RegAccessType, RegId, RegIdInt};
 /// Contains X86-specific details for an instruction
 pub struct X86InsnDetail<'a>(pub(crate) &'a cs_x86);
 
-// todo(tmfink): expose new types cs_x86__bindgen_ty_1, cs_x86_encoding, x86_xop_cc,
-// cs_x86_op::access
+// todo(tmfink): expose new types cs_x86__bindgen_ty_1, cs_x86_op::access
 
 impl X86OperandType {
     fn new(op_type: x86_op_type, value: cs_x86_op__bindgen_ty_1) -> X86OperandType {
@@ -103,6 +103,11 @@ impl<'a> X86InsnDetail<'a> {
     /// A trailing opcode byte gets value 0 when irrelevant.
     pub fn opcode(&self) -> &[u8; 4] {
         &self.0.opcode
+    }
+
+    /// Instruction encoding information, e.g. displacement offset, size.
+    pub fn encoding(&self) -> cs_x86_encoding {
+        self.0.encoding
     }
 
     /// REX prefix: only a non-zero value is relevant for x86_64
@@ -313,9 +318,7 @@ mod test {
             avx_sae: false,
             avx_rm: x86_avx_rm::X86_AVX_RM_INVALID,
             op_count: 0,
-            __bindgen_anon_1: cs_x86__bindgen_ty_1 {
-                eflags: 0,
-            },
+            __bindgen_anon_1: cs_x86__bindgen_ty_1 { eflags: 0 },
             encoding: cs_x86_encoding {
                 modrm_offset: 0,
                 disp_offset: 0,
@@ -324,30 +327,22 @@ mod test {
                 imm_size: 0,
             },
             xop_cc: x86_xop_cc::X86_XOP_CC_INVALID,
-            operands: [ cs_x86_op {
+            operands: [cs_x86_op {
                 type_: x86_op_type::X86_OP_INVALID,
-                __bindgen_anon_1: cs_x86_op__bindgen_ty_1 { reg: x86_reg::X86_REG_INVALID },
+                __bindgen_anon_1: cs_x86_op__bindgen_ty_1 {
+                    reg: x86_reg::X86_REG_INVALID,
+                },
                 size: 0,
                 avx_bcast: x86_avx_bcast::X86_AVX_BCAST_INVALID,
                 avx_zero_opmask: false,
                 access: 0,
-            }
-            ; 8],
-
+            }; 8],
         };
         let mut a2 = a1.clone();
         a2.operands[1].type_ = x86_op_type::X86_OP_REG;
-        let a1_clone = cs_x86 {
-            ..a1
-        };
-        let a3 = cs_x86 {
-            rex: 1,
-            ..a1
-        };
-        let op_count_differ = cs_x86 {
-            op_count: 1,
-            ..a1
-        };
+        let a1_clone = cs_x86 { ..a1 };
+        let a3 = cs_x86 { rex: 1, ..a1 };
+        let op_count_differ = cs_x86 { op_count: 1, ..a1 };
         let mut op1_differ = op_count_differ.clone();
         op1_differ.operands[0].avx_bcast = x86_avx_bcast::X86_AVX_BCAST_2;
 
